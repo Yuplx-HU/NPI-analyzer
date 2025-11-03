@@ -16,15 +16,15 @@ from NPI_analyzer import stern_volmer, plot_stern_volmer
 from NPI_analyzer import hill, plot_hill
 from NPI_analyzer import vant_hoff, plot_vant_hoff
 
-Q = np.array([0, 1e-6, 2e-6, 4e-6, 6e-6])
-F0 = np.array([1000, 950, 900, 850, 800])
-F = np.array([1000, 700, 500, 300, 200])
+Q = [0, 1e-6, 2e-6, 4e-6, 6e-6]
+F0 = [1000, 950, 900, 850, 800]
+F = [1000, 700, 500, 300, 200]
 
 plot_stern_volmer(stern_volmer(F0, F, Q))
 plot_hill(hill(F0, F, Q))
 
-T = np.array([298, 303, 310, 318, 333])
-ka = np.array([1.15E+06, 1.45E+05, 3.02E+04, 6.57E+03, 6.05E+03])
+T = [298, 303, 310, 318, 333]
+ka = [1.15E+06, 1.45E+05, 3.02E+04, 6.57E+03, 6.05E+03]
 
 plot_vant_hoff(vant_hoff(T, ka))
 ```
