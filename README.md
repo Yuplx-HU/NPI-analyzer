@@ -12,28 +12,36 @@ NPI-analyzer: Python toolkit for Nanoparticle-Protein Interaction analysis. Perf
 ## Quick use
 
 ```python
-from NPI_analyzer import stern_volmer, plot_stern_volmer
-from NPI_analyzer import hill, plot_hill
-from NPI_analyzer import vant_hoff, plot_vant_hoff
-
-Q = [0, 1e-6, 2e-6, 4e-6, 6e-6]
-F0 = [1000, 950, 900, 850, 800]
-F = [1000, 700, 500, 300, 200]
-
-plot_stern_volmer(stern_volmer(F0, F, Q))
-plot_hill(hill(F0, F, Q))
-
-T = [298, 303, 310, 318, 333]
-ka = [1.15E+06, 1.45E+05, 3.02E+04, 6.57E+03, 6.05E+03]
-
-plot_vant_hoff(vant_hoff(T, ka))
+from NPI_analyzer import stern_volmer, plot_stern_volmer, hill, plot_hill, vant_hoff, plot_vant_hoff
+    
+plot_stern_volmer(
+    stern_volmer(
+        [1000, 950, 900, 850, 800],
+        [1000, 700, 500, 300, 200],
+        [0, 1e-6, 2e-6, 4e-6, 6e-6],
+        2.6e-9
+    )
+)
+plot_hill(
+    hill(
+        [1000, 950, 900, 850, 800],
+        [1000, 700, 500, 300, 200],
+        [0, 1e-6, 2e-6, 4e-6, 6e-6]
+    )
+)
+plot_vant_hoff(
+    vant_hoff(
+        [298, 303, 310, 318, 333],
+        [1.15e+6, 1.45e+5, 3.02e+4, 6.57e+3, 6.05e+3]
+    )
+)
 ```
 
 ## Requirements
 
 `numpy`, `scipy`, `matplotlib`
 
-Just download `npi_analyzer.py` and import into your analysis scripts.
+Just download `NPI_analyzer.py` and import into your analysis scripts.
 
 
 ## For bionano researchers
