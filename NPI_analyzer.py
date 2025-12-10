@@ -1,243 +1,196 @@
 import os
 from datetime import datetime
-from typing import List, Dict, Union
 
 import numpy as np
 from scipy import stats
-import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 
-
-def linear_regression(x, y):
-    slope, intercept, r_value, _, std_err = stats.linregress(x, y)
-    return {
-        'slope': slope,
-        'intercept': intercept,
-        'r_squared': r_value**2,
-        'std_err': std_err
-    }
+import matplotlib.pyplot as plt
 
 
-def convert_to_ndarray(data):
-    if data is None:
-        return None
-    
-    if isinstance(data, np.ndarray):
-        return data
-    
-    if isinstance(data, list):
-        from numbers import Number
-        if all(isinstance(x, Number) for x in data):
-            return np.array(data, dtype=float)
-        else:
-            return np.array(data)
-    
-    if isinstance(data, tuple):
-        return np.array(data)
-    
-    try:
-        import pandas as pd
-        if isinstance(data, pd.Series):
-            return data.values
-    except ImportError:
-        pass
-    
-    if isinstance(data, Number):
-        return np.array([data])
-    
-    try:
-        return np.asarray(data)
-    except Exception as e:
-        raise TypeError(f"Can not convert {type(data)} into ndarray: {e}")
+def _save_plot(fig: plt.Figure, save_plot_dir: str, save_name: str):
+    os.makedirs(save_plot_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y-%m-%d-%H%M%S')
+    plot_save_path = os.path.join(save_plot_dir, f"{save_name}-{timestamp}.png")
+    fig.savefig(plot_save_path, dpi=300, bbox_inches="tight")
+    return plot_save_path
 
 
-def stern_volmer(F0: List[float], F: List[float], Q: List[float], tau0: float):
+def stern_volmer(F0: list[float], F: list[float], Q: list[float], tau0: float,
+                 return_plot: bool = False, save_plot: bool = False, save_plot_dir: str = "output/plots/"):
     """
     Description:
-        Analyze fluorescence quenching data using Stern-Volmer equation to calculate quenching constants and identify quenching type.
-
+        Perform Stern-Volmer quenching analysis to determine quenching constants.
+        
     Required Parameters:
-        - F0: Fluorescence intensity without quencher
-            - Type: List[float]
-            - Purpose: Serves as reference fluorescence intensity baseline
+        - F0: Fluorescence intensities without quencher
+            - Type: list[float]
+            - Purpose: Baseline fluorescence data for quenching calculation
             - Constraints: Must have same length as F and Q
-        - F: Fluorescence intensity at different quencher concentrations
-            - Type: List[float]
-            - Purpose: Used to calculate F0/F ratio
-            - Constraints: Must have same length as F0 and Q, values should be less than F0
-        - Q: Quencher concentration series
-            - Type: List[float]
-            - Purpose: Used as independent variable for linear regression analysis
-            - Constraints: Must have same length as F0 and F, units: mol/L
-        - tau0: Fluorescence lifetime
+        - F: Fluorescence intensities with quencher
+            - Type: list[float]
+            - Purpose: Quenched fluorescence data for Stern-Volmer analysis
+            - Constraints: Must have same length as F0 and Q
+        - Q: Quencher concentrations
+            - Type: list[float]
+            - Purpose: Concentration values for quenching analysis
+            - Constraints: Must be positive values; same length as F0 and F
+            - Units: M (mol/L)
+        - tau0: Fluorescence lifetime without quencher
             - Type: float
             - Purpose: Used to calculate bimolecular quenching rate constant
-            - Constraints: Must be positive, units: seconds (s)
-
-    Returns:
-        - Type: Dict
-        - Purpose: Contains all results from Stern-Volmer analysis
-        - Contains keys: k_SV (quenching constant, M⁻¹), k_q (bimolecular quenching rate constant, M⁻¹s⁻¹), quenching_type, slope, F0_over_F, intercept, r_squared, etc.
-    """
-    Q_arr, F0_arr, F_arr = map(convert_to_ndarray, [Q, F0, F])
-    F0_over_F = F0_arr / F_arr
+            - Constraints: Must be positive
+            - Units: ns
     
-    reg = linear_regression(Q_arr, F0_over_F)
-    k_SV = reg['slope']
+    Optional Parameters:
+        - return_plot: Whether to return the plot figure
+            - Default: False
+            - Type: bool
+            - Purpose: Control whether to include matplotlib figure in return dict
+        - save_plot: Whether to save the plot to file
+            - Default: False
+            - Type: bool
+            - Purpose: Control automatic saving of Stern-Volmer plot
+        - save_plot_dir: Directory for saving plots
+            - Default: "output/plots/"
+            - Type: str
+            - Purpose: Specify custom directory for plot saving
+    
+    Returns:
+        - Dictionary containing analysis results
+            - Type: dict
+            - Content: Includes k_SV (Stern-Volmer constant), k_q (bimolecular quenching rate constant), 
+                      r_squared (regression quality), std_error (fitting error), plot (if return_plot=True), 
+                      and save_plot_path (if save_plot=True)
+    """    
+    F0, F, Q = map(np.array, [F0, F, Q])
+    F0_over_F = F0 / F
+    
+    slope, intercept, r_value, _, std_error = stats.linregress(Q, F0_over_F)
+    k_SV = slope
     k_q = k_SV / tau0
     
-    return {
-        'k_SV': k_SV,
-        'k_q': k_q,
-        'quenching_type': "static" if k_q > 1e10 else "dynamic",
-        'F0_over_F': F0_over_F,
-        'Q': Q_arr,
-        **reg
+    results = {
+        "k_SV": k_SV,
+        "k_q": k_q,
+        "r_squared": r_value ** 2,
+        "std_error": std_error,
     }
+    
+    if return_plot or save_plot:
+        fig, ax = plt.subplots(figsize=(5, 3))
+        ax.scatter(Q, F0_over_F, color='blue', alpha=0.7, s=80, label='Data')
+        
+        Q_fit = np.linspace(Q.min(), Q.max(), 100)
+        ax.plot(Q_fit, slope * Q_fit + intercept, 'r-', linewidth=2, 
+                label=f'Fit (k_SV = {k_SV:.2e} M⁻¹)')
+        
+        ax.set(xlabel='[Q] (M)', ylabel='F₀/F', title="Stern-Volmer Plot")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        text_str = f'k_SV = {k_SV:.2e} M⁻¹\nk_q = {k_q:.2e} M⁻¹s⁻¹\nR² = {r_value**2:.4f}'
+        ax.text(0.05, 0.95, text_str, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        if return_plot:
+            results["plot"] = fig
+        if save_plot:
+            results["save_plot_path"] = _save_plot(fig, save_plot_dir, "stern_volmer")
+    
+    return results
 
 
-def plot_stern_volmer(results: Dict, save_plot: bool = True):
+def hill(F0: list[float], F: list[float], Q: list[float],
+         return_plot: bool = False, save_plot: bool = False, save_plot_dir: str = "output/plots/"):
     """
     Description:
-        Generate Stern-Volmer plot to visualize fluorescence quenching analysis results.
-
+        Perform Hill plot analysis to determine binding affinity and cooperativity.
+        
     Required Parameters:
-        - results: Stern-Volmer analysis results
-            - Type: Dict
-            - Purpose: Contains all data and parameters required for plotting
-            - Constraints: Must be a valid result dictionary generated by stern_volmer function
-
-    Optional Parameters:
-        - save_plot: Whether to save the plot as file
-            - Default: True, automatically saves plot to output directory
-            - Type: bool
-            - Purpose: Controls whether to save plot as PNG file
-            - Constraints: When True, generates timestamped plot file in output/plots directory
-
-    Returns:
-        - Type: Dict
-        - Purpose: Contains plot object and optional file path information
-        - Contains keys: figure (plot object), plot_save_path (included when save_plot is True)
-    """
-    fig, ax = plt.subplots(figsize=(5, 3))
-    
-    ax.scatter(results['Q'], results['F0_over_F'], color='blue', alpha=0.7, s=80, label='Experimental Data')
-    
-    Q_fit = np.linspace(min(results['Q']), max(results['Q']), 100)
-    F0_over_F_fit = results['slope'] * Q_fit + results['intercept']
-    ax.plot(Q_fit, F0_over_F_fit, 'r-', linewidth=2, 
-            label=f'Linear Fit (k_SV = {results["k_SV"]:.2e} M⁻¹)')
-    
-    ax.set_xlabel('Quencher Concentration [Q] (M)')
-    ax.set_ylabel('F₀/F')
-    ax.set_title("Stern-Volmer Plot")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    text_str = (f'k_SV = {results["k_SV"]:.2e} M⁻¹\n'
-                f'k_q = {results["k_q"]:.2e} M⁻¹s⁻¹\n'
-                f'R² = {results["r_squared"]:.4f}')
-    ax.text(0.05, 0.95, text_str, transform=ax.transAxes, fontsize=10, 
-            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-    
-    return _save_plot(fig, "stern_volmer", save_plot)
-
-
-def hill(F0: List[float], F: List[float], Q: List[float]):
-    """
-    Description:
-        Analyze ligand binding data using Hill equation to calculate binding constant and Hill coefficient.
-
-    Required Parameters:
-        - F0: Fluorescence intensity without ligand
-            - Type: List[float]
-            - Purpose: Serves as reference fluorescence intensity baseline
+        - F0: Fluorescence intensities without quencher
+            - Type: list[float]
+            - Purpose: Baseline fluorescence for Hill transformation
             - Constraints: Must have same length as F and Q
-        - F: Fluorescence intensity at different ligand concentrations
-            - Type: List[float]
-            - Purpose: Used to calculate (F0-F)/F ratio
-            - Constraints: Must have same length as F0 and Q, values should be less than F0
-        - Q: Ligand concentration series
-            - Type: List[float]
-            - Purpose: Used as independent variable for log-transformed linear regression analysis
-            - Constraints: Must have same length as F0 and F, units: mol/L, positive values required for valid calculation
-
-    Returns:
-        - Type: Dict
-        - Purpose: Contains all results from Hill analysis
-        - Contains keys: k_a (binding constant, M⁻¹), n (Hill coefficient), log_x (log concentration), log_y (log binding ratio), intercept, r_squared, etc.
-    """
-    Q_arr, F0_arr, F_arr = map(convert_to_ndarray, [Q, F0, F])
+        - F: Fluorescence intensities with quencher
+            - Type: list[float]
+            - Purpose: Quenched fluorescence for Hill analysis
+            - Constraints: Must have same length as F0 and Q
+        - Q: Quencher concentrations
+            - Type: list[float]
+            - Purpose: Concentration values for Hill plot
+            - Constraints: Positive values; same length as F0 and F
+            - Units: M (mol/L)
     
-    mask = Q_arr > 0
-    Q_valid, F0_valid, F_valid = Q_arr[mask], F0_arr[mask], F_arr[mask]
-    
-    x = np.log10(Q_valid)
-    y = np.log10((F0_valid - F_valid) / F_valid)
-    
-    reg = linear_regression(x, y)
-    
-    return {
-        'k_a': 10 ** reg['intercept'],
-        'n': reg['slope'],
-        'log_x': x,
-        'log_y': y,
-        **reg
-    }
-
-
-def plot_hill(results: Dict, save_plot: bool = True):
-    """
-    Description:
-        Generate Hill plot to visualize ligand binding analysis results.
-
-    Required Parameters:
-        - results: Hill analysis results
-            - Type: Dict
-            - Purpose: Contains all data and parameters required for plotting
-            - Constraints: Must be a valid result dictionary generated by hill function
-
     Optional Parameters:
-        - save_plot: Whether to save the plot as file
-            - Default: True, automatically saves plot to output directory
+        - return_plot: Whether to return the plot figure
+            - Default: False
             - Type: bool
-            - Purpose: Controls whether to save plot as PNG file
-            - Constraints: When True, generates timestamped plot file in output/plots directory
-
+            - Purpose: Control whether to include matplotlib figure in return dict
+        - save_plot: Whether to save the plot to file
+            - Default: False
+            - Type: bool
+            - Purpose: Control automatic saving of Hill plot
+        - save_plot_dir: Directory for saving plots
+            - Default: "output/plots/"
+            - Type: str
+            - Purpose: Specify custom directory for plot saving
+    
     Returns:
-        - Type: Dict
-        - Purpose: Contains plot object and optional file path information
-        - Contains keys: figure (plot object), plot_save_path (included when save_plot is True)
+        - Dictionary containing Hill analysis results
+            - Type: dict
+            - Content: Includes k_a (association constant), n (Hill coefficient), 
+                      r_squared (regression quality), std_error (fitting error), 
+                      plot (if return_plot=True), and save_plot_path (if save_plot=True)
     """
-    fig, ax = plt.subplots(figsize=(5, 3))
+    F0, F, Q = map(np.array, [F0, F, Q])
+    mask = Q > 0
+    Q, F0, F = Q[mask], F0[mask], F[mask]
     
-    ax.scatter(results['log_x'], results['log_y'], color='green', alpha=0.7, s=80, label='Experimental Data')
+    x = np.log10(Q)
+    y = np.log10((F0 - F) / F)
     
-    x_fit = np.linspace(min(results['log_x']), max(results['log_x']), 100)
-    y_fit = results['n'] * x_fit + results['intercept']
-    ax.plot(x_fit, y_fit, 'r-', linewidth=2, label=f'Linear Fit (n = {results["n"]:.3f})')
+    slope, intercept, r_value, _, std_error = stats.linregress(x, y)
+    n = slope
+    k_a = 10 ** intercept
     
-    ax.set_xlabel('log[Q]')
-    ax.set_ylabel('log[(F₀-F)/F]')
-    ax.set_title("Hill Plot")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    results = {
+        "k_a": k_a,
+        "n": n,
+        "r_squared": r_value ** 2,
+        "std_error": std_error,
+    }
     
-    text_str = (f'k_a = {results["k_a"]:.2e} M⁻¹\n'
-                f'n = {results["n"]:.3f}\n'
-                f'R² = {results["r_squared"]:.4f}')
-    ax.text(0.05, 0.95, text_str, transform=ax.transAxes, fontsize=10, 
-            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    if return_plot or save_plot:
+        fig, ax = plt.subplots(figsize=(5, 3))
+        ax.scatter(x, y, color='green', alpha=0.7, s=80, label='Data')
+        
+        x_fit = np.linspace(x.min(), x.max(), 100)
+        ax.plot(x_fit, n * x_fit + intercept, 'r-', linewidth=2, 
+                label=f'Fit (n = {n:.3f})')
+        
+        ax.set(xlabel='log[Q]', ylabel='log[(F₀-F)/F]', title="Hill Plot")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        text_str = f'k_a = {k_a:.2e} M⁻¹\nn = {n:.3f}\nR² = {r_value**2:.4f}'
+        ax.text(0.05, 0.95, text_str, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        if return_plot:
+            results["plot"] = fig
+        if save_plot:
+            results["save_plot_path"] = _save_plot(fig, save_plot_dir, "hill")
     
-    return _save_plot(fig, "hill", save_plot)
+    return results
 
 
 def _vant_hoff_linear(T: np.ndarray, ka: np.ndarray, R: float):
-    inv_T, ln_ka = 1/T, np.log(ka)
-    reg = linear_regression(inv_T, ln_ka)
+    inv_T, ln_ka = 1 / T, np.log(ka)
+    slope, intercept, r_value, _, std_error = stats.linregress(inv_T, ln_ka)
     
-    delta_H = -reg['slope'] * R / 1000
-    delta_S = reg['intercept'] * R
+    delta_H = -slope * R / 1000
+    delta_S = intercept * R
     
     return {
         'deltaH': delta_H,
@@ -247,29 +200,31 @@ def _vant_hoff_linear(T: np.ndarray, ka: np.ndarray, R: float):
         'ka': ka,
         'inv_T': inv_T,
         'ln_ka': ln_ka,
-        **reg
+        'slope': slope,
+        'intercept': intercept,
+        'r_squared': r_value ** 2,
+        'std_error': std_error
     }
 
 
 def _vant_hoff_quadratic(T: np.ndarray, ka: np.ndarray, R: float):
     def model(x, a0, a1, a2):
-        return a0 + a1*x + a2*x**2
+        return a0 + a1 * x + a2 * x ** 2
     
-    inv_T, ln_ka = 1/T, np.log(ka)
+    inv_T, ln_ka = 1 / T, np.log(ka)
     popt, pcov = curve_fit(model, inv_T, ln_ka)
     a0, a1, a2 = popt
     
     ln_ka_pred = model(inv_T, *popt)
-    r_squared = 1 - np.sum((ln_ka - ln_ka_pred)**2) / np.sum((ln_ka - np.mean(ln_ka))**2)
+    r_squared = 1 - np.sum((ln_ka - ln_ka_pred) ** 2) / np.sum((ln_ka - np.mean(ln_ka)) ** 2)
     
     delta_H = -R * (a1 + 2 * a2 / T) / 1000
-    delta_S = R * (a0 - a2 / T**2)
-    delta_G = delta_H - T * delta_S / 1000
+    delta_S = R * (a0 - a2 / T ** 2)
     
     return {
         'deltaH': delta_H,
         'deltaS': delta_S,
-        'deltaG': delta_G,
+        'deltaG': delta_H - T * delta_S / 1000,
         'T': T,
         'ka': ka,
         'inv_T': inv_T,
@@ -280,130 +235,105 @@ def _vant_hoff_quadratic(T: np.ndarray, ka: np.ndarray, R: float):
     }
 
 
-def vant_hoff(T: List[float], ka: List[float], R: float = 8.314):
+def vant_hoff(T: list[float], ka: list[float], R: float = 8.314,
+              return_plot: bool = False, save_plot: bool = False, save_plot_dir: str = "output/plots/"):
     """
     Description:
-        Analyze temperature dependence of equilibrium constant using Van't Hoff equation to calculate thermodynamic parameters.
-
+        Perform Van't Hoff analysis to determine thermodynamic parameters from temperature-dependent binding data.
+        
     Required Parameters:
-        - T: Temperature series
-            - Type: List[float]
-            - Purpose: Used as independent variable for thermodynamic analysis
-            - Constraints: Must have same length as ka, units: Kelvin (K)
-        - ka: Equilibrium constant series at corresponding temperatures
-            - Type: List[float]
-            - Purpose: Used as dependent variable for regression analysis
-            - Constraints: Must have same length as T, must be positive values
-
+        - T: Temperature values
+            - Type: list[float]
+            - Purpose: Temperature data for thermodynamic analysis
+            - Constraints: Must have same length as ka; must be positive
+            - Units: K
+        - ka: Association constants
+            - Type: list[float]
+            - Purpose: Binding constants at corresponding temperatures
+            - Constraints: Must have same length as T; must be positive
+    
     Optional Parameters:
-        - R: Gas constant
-            - Default: 8.314, suitable for SI unit calculations
+        - R: Universal gas constant
+            - Default: 8.314
             - Type: float
-            - Purpose: Used for unit conversion and calculation of thermodynamic parameters
-            - Constraints: Typically 8.314 J/(mol·K), adjustable based on unit system
-
-    Returns:
-        - Type: Dict
-        - Purpose: Contains all results from Van't Hoff analysis and model selection information
-        - Contains keys: deltaH (enthalpy change, kJ/mol), deltaS (entropy change, J/(mol·K)), deltaG (free energy change, kJ/mol), selected_model, aic (model selection criterion), etc.
-    """
-    T_arr, ka_arr = map(convert_to_ndarray, [T, ka])
-    
-    linear = _vant_hoff_linear(T_arr, ka_arr, R)
-    quadratic = _vant_hoff_quadratic(T_arr, ka_arr, R)
-    
-    n = len(T_arr)
-    residuals_linear = linear['ln_ka'] - (linear['slope'] * linear['inv_T'] + linear['intercept'])
-    residuals_quad = quadratic['ln_ka'] - (quadratic['a0'] + quadratic['a1'] * quadratic['inv_T'] + quadratic['a2'] * quadratic['inv_T']**2)
-    
-    aic_linear = n * np.log(np.sum(residuals_linear**2) / n) + 4
-    aic_quadratic = n * np.log(np.sum(residuals_quad**2) / n) + 6
-    
-    result = quadratic if aic_quadratic < aic_linear else linear
-    result.update({
-        'selected_model': 'quadratic' if aic_quadratic < aic_linear else 'linear',
-        'aic': aic_quadratic if aic_quadratic < aic_linear else aic_linear
-    })
-    
-    return result
-
-
-def plot_vant_hoff(results: Dict, save_plot: bool = True):
-    """
-    Description:
-        Generate Van't Hoff plot to visualize temperature dependence analysis of equilibrium constant.
-
-    Required Parameters:
-        - results: Van't Hoff analysis results
-            - Type: Dict
-            - Purpose: Contains all data and parameters required for plotting
-            - Constraints: Must be a valid result dictionary generated by vant_hoff function
-
-    Optional Parameters:
-        - save_plot: Whether to save the plot as file
-            - Default: True, automatically saves plot to output directory
+            - Purpose: Used in thermodynamic calculations
+            - Constraints: Typically 8.314 for SI units
+            - Units: J/(mol·K)
+        - return_plot: Whether to return the plot figure
+            - Default: False
             - Type: bool
-            - Purpose: Controls whether to save plot as PNG file
-            - Constraints: When True, generates timestamped plot file in output/plots directory
-
+            - Purpose: Control whether to include matplotlib figure in return dict
+        - save_plot: Whether to save the plot to file
+            - Default: False
+            - Type: bool
+            - Purpose: Control automatic saving of Van't Hoff plot
+        - save_plot_dir: Directory for saving plots
+            - Default: "output/plots/"
+            - Type: str
+            - Purpose: Specify custom directory for plot saving
+    
     Returns:
-        - Type: Dict
-        - Purpose: Contains plot object and optional file path information
-        - Contains keys: figure (plot object), plot_save_path (included when save_plot is True)
+        - Dictionary containing thermodynamic analysis results
+            - Type: dict
+            - Content: Includes deltaH (enthalpy change), deltaS (entropy change), deltaG (Gibbs free energy change),
+                      selected_model (linear or quadratic), aic (Akaike Information Criterion), r_squared (regression quality),
+                      T, ka, inv_T, ln_ka, plot (if return_plot=True), and save_plot_path (if save_plot=True)
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    T, ka = map(np.array, [T, ka])
     
-    is_linear = results['selected_model'] == 'linear'
-    model_label = 'Linear' if is_linear else 'Quadratic'
+    linear = _vant_hoff_linear(T, ka, R)
+    quadratic = _vant_hoff_quadratic(T, ka, R)
     
-    ax1.scatter(results['inv_T'], results['ln_ka'], color='blue', alpha=0.7, s=80, label='Experimental Data')
-    inv_T_fit = np.linspace(min(results['inv_T']), max(results['inv_T']), 100)
+    n = len(T)
+    residuals_linear = linear['ln_ka'] - (linear['slope'] * linear['inv_T'] + linear['intercept'])
+    residuals_quad = quadratic['ln_ka'] - (quadratic['a0'] + quadratic['a1'] * quadratic['inv_T'] + quadratic['a2'] * quadratic['inv_T'] ** 2)
     
-    if is_linear:
-        ln_ka_fit = results['slope'] * inv_T_fit + results['intercept']
-        T_fit = np.linspace(min(results['T']), max(results['T']), 100)
-        ka_fit = np.exp(results['slope'] / T_fit + results['intercept'])
-        text_str = (f'ΔH = {results["deltaH"]:.2f} kJ/mol\n'
-                   f'ΔS = {results["deltaS"]:.2f} J/(mol·K)\n'
-                   f'R² = {results["r_squared"]:.4f}')
-    else:
-        ln_ka_fit = results['a0'] + results['a1'] * inv_T_fit + results['a2'] * inv_T_fit**2
-        T_fit = np.linspace(min(results['T']), max(results['T']), 100)
-        ka_fit = np.exp(results['a0'] + results['a1'] / T_fit + results['a2'] / T_fit**2)
-        text_str = (f'a0 = {results["a0"]:.4f}\n'
-                   f'a1 = {results["a1"]:.4f}\n'
-                   f'a2 = {results["a2"]:.4f}\n'
-                   f'R² = {results["r_squared"]:.4f}')
+    aic_linear = n * np.log(np.sum(residuals_linear ** 2) / n) + 4
+    aic_quadratic = n * np.log(np.sum(residuals_quad ** 2) / n) + 6
     
-    ax1.plot(inv_T_fit, ln_ka_fit, 'r-', linewidth=2, label=f'{model_label} Fit')
-    ax1.set_xlabel('1/T (K⁻¹)')
-    ax1.set_ylabel('ln(ka)')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    ax1.text(0.05, 0.95, text_str, transform=ax1.transAxes, fontsize=10,
-             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    results = quadratic if aic_quadratic < aic_linear else linear
     
-    ax2.scatter(results['T'], results['ka'], color='green', alpha=0.7, s=80, label='Experimental Data')
-    ax2.plot(T_fit, ka_fit, 'r-', linewidth=2, label='Fit')
-    ax2.set_xlabel('Temperature (K)')
-    ax2.set_ylabel('ka')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
+    if return_plot or save_plot:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        
+        is_linear = aic_quadratic > aic_linear
+        model_label = 'Linear' if is_linear else 'Quadratic'
+        
+        ax1.scatter(results['inv_T'], results['ln_ka'], color='blue', alpha=0.7, s=80, label='Data')
+        inv_T_fit = np.linspace(results['inv_T'].min(), results['inv_T'].max(), 100)
+        
+        if is_linear:
+            ln_ka_fit = results['slope'] * inv_T_fit + results['intercept']
+            text_str = f'ΔH = {results["deltaH"][0]:.2f} kJ/mol\nΔS = {results["deltaS"][0]:.2f} J/(mol·K)\nR² = {results["r_squared"]:.4f}'
+        else:
+            ln_ka_fit = results['a0'] + results['a1'] * inv_T_fit + results['a2'] * inv_T_fit ** 2
+            text_str = f'a0 = {results["a0"]:.4f}\na1 = {results["a1"]:.4f}\na2 = {results["a2"]:.4f}\nR² = {results["r_squared"]:.4f}'
+        
+        ax1.plot(inv_T_fit, ln_ka_fit, 'r-', linewidth=2, label=f'{model_label} Fit')
+        ax1.set(xlabel='1/T (K⁻¹)', ylabel='ln(ka)', title="Van't Hoff Plot (Linear)")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        ax1.text(0.05, 0.95, text_str, transform=ax1.transAxes, fontsize=10,
+                 verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        ax2.scatter(results['T'], results['ka'], color='green', alpha=0.7, s=80, label='Data')
+        T_fit = np.linspace(results['T'].min(), results['T'].max(), 100)
+        
+        if is_linear:
+            ka_fit = np.exp(results['slope'] / T_fit + results['intercept'])
+        else:
+            ka_fit = np.exp(results['a0'] + results['a1'] / T_fit + results['a2'] / T_fit ** 2)
+        
+        ax2.plot(T_fit, ka_fit, 'r-', linewidth=2, label='Fit')
+        ax2.set(xlabel='Temperature (K)', ylabel='ka', title="Temperature Dependence")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if return_plot:
+            results["plot"] = fig
+        if save_plot:
+            results["save_plot_path"] = _save_plot(fig, save_plot_dir, "vant_hoff")
     
-    fig.suptitle("Van't Hoff Plot")
-    plt.tight_layout()
-    
-    return _save_plot(fig, "vant_hoff", save_plot)
-
-
-def _save_plot(fig: plt.Figure, name: str, save_plot: bool) -> Dict[str, Union[plt.Figure, str]]:
-    result = {'figure': fig}
-    
-    if save_plot:
-        timestamp = datetime.now().strftime('%Y-%m-%d-%H%M%S')
-        plot_save_path = f"output/plots/{name}-{timestamp}.png"
-        os.makedirs(os.path.dirname(plot_save_path), exist_ok=True)
-        fig.savefig(plot_save_path, dpi=300, bbox_inches='tight')
-        result['plot_save_path'] = plot_save_path
-    
-    return result
+    return results
